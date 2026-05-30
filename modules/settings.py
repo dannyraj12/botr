@@ -2,7 +2,7 @@ from pyrogram import filters
 from pyrogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 )
-from main import app
+from bot import app
 from database import get_user, update_user
 
 
