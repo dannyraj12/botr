@@ -8,6 +8,7 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
+import modules.start
 import modules.leech
 import modules.mirror
 import modules.settings
