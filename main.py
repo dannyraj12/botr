@@ -8,9 +8,7 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-import modules.start
-import modules.leech
-import modules.mirror
-import modules.settings
+# Import modules AFTER app is defined so they can safely import app
+from modules import start, leech, mirror, settings  # noqa: E402, F401
 
 app.run()
