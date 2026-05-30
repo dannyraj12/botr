@@ -6,7 +6,7 @@ import logging
 from pyrogram import filters
 from pyrogram.errors import MessageNotModified
 
-from main import app
+from bot import app
 from database import get_user
 from config import FREE_SPLIT_SIZE, PREMIUM_SPLIT_SIZE, STATUS_UPDATE_INTERVAL, DOWNLOAD_DIR
 from modules.downloader import download_file
