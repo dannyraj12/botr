@@ -1,0 +1,16 @@
+import os
+
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
+
+DOWNLOAD_DIR = "downloads"
+TEMP_DIR = "temp"
+
+FREE_SPLIT_SIZE = 2 * 1024**3
+PREMIUM_SPLIT_SIZE = 4 * 1024**3
+
+CHUNK_SIZE = 1024 * 1024
+MAX_RETRIES = 20
+STATUS_UPDATE_INTERVAL = 5
