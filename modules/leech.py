@@ -8,7 +8,7 @@ from pyrogram.errors import MessageNotModified
 
 from bot import app
 from database import get_user
-from config import FREE_SPLIT_SIZE, PREMIUM_SPLIT_SIZE, STATUS_UPDATE_INTERVAL, DOWNLOAD_DIR
+from config import FREE_SPLIT_SIZE, STATUS_UPDATE_INTERVAL, DOWNLOAD_DIR
 from modules.downloader import download_file
 from modules.upload import upload_telegram
 from modules.status import build_status
@@ -20,31 +20,19 @@ from modules.cleanup import cleanup
 log = logging.getLogger(__name__)
 
 
-def _parse_args(text: str):
-    """
-    Parse command text.
-    Returns (url, do_zip, do_extract)
-    Example: /leech -z -e https://example.com/file.zip
-    """
-    parts = text.split()
-    # Drop the command itself (/leech)
-    parts = parts[1:]
-
+def _parse_args(text):
+    parts = text.split()[1:]
     do_zip = "-z" in parts
     do_extract = "-e" in parts
-
-    # URL is the last non-flag token
     url = None
     for p in reversed(parts):
         if not p.startswith("-"):
             url = p
             break
-
     return url, do_zip, do_extract
 
 
-async def _status_loop(task: dict, status_msg):
-    """Background task: edit status message every STATUS_UPDATE_INTERVAL seconds."""
+async def _status_loop(task, status_msg):
     while not task.get("done_flag"):
         try:
             text = await build_status(task)
@@ -66,7 +54,6 @@ async def leech_handler(_, message):
 
     user = await get_user(message.from_user.id)
 
-    # Check dump channel
     if not user.get("dump_id"):
         await message.reply(
             "⚠️ **Dump channel not set.**\n"
@@ -75,7 +62,7 @@ async def leech_handler(_, message):
         return
 
     task_id = new_task_id()
-    raw_name = url.split("?")[0].split("/")[-1] or f"file_{task_id}"
+    raw_name = url.split("?")[0].split("/")[-1] or "file_{}".format(task_id)
 
     task = {
         "id": task_id,
@@ -93,23 +80,21 @@ async def leech_handler(_, message):
 
     add_task(task_id, task)
 
-    task_dir = os.path.join(DOWNLOAD_DIR, f"task_{task_id}")
+    task_dir = os.path.join(DOWNLOAD_DIR, "task_{}".format(task_id))
     os.makedirs(task_dir, exist_ok=True)
     dl_path = os.path.join(task_dir, raw_name)
 
-    status_msg = await message.reply(f"🚀 Starting leech `{task_id}`...")
+    status_msg = await message.reply("🚀 Starting leech `{}`...".format(task_id))
 
-    # Start live status updater
     status_loop = asyncio.create_task(_status_loop(task, status_msg))
 
     try:
-        # ── Download ──────────────────────────────────────────────────────────
+        # Download
         task["status"] = "downloading"
         await download_file(task, url, dl_path)
 
-        # ── Post-process ──────────────────────────────────────────────────────
+        # Extract
         process_path = dl_path
-
         if do_extract:
             task["action"] = "Extracting"
             process_path = await asyncio.get_event_loop().run_in_executor(
@@ -117,6 +102,7 @@ async def leech_handler(_, message):
             )
             task["name"] = os.path.basename(process_path)
 
+        # Zip
         if do_zip:
             task["action"] = "Zipping"
             process_path = await asyncio.get_event_loop().run_in_executor(
@@ -124,50 +110,54 @@ async def leech_handler(_, message):
             )
             task["name"] = os.path.basename(process_path)
 
-        # ── Split if needed ───────────────────────────────────────────────────
-        # Determine split size (premium check placeholder — always free for now)
-        split_size = FREE_SPLIT_SIZE
+        # Split if needed
         file_size = os.path.getsize(process_path)
-
-        if file_size > split_size:
+        if file_size > FREE_SPLIT_SIZE:
             task["action"] = "Splitting"
             parts = await asyncio.get_event_loop().run_in_executor(
-                None, split_file, process_path, split_size
+                None, split_file, process_path, FREE_SPLIT_SIZE
             )
         else:
             parts = [process_path]
 
-        # ── Upload ────────────────────────────────────────────────────────────
+        # Upload — stop status loop so upload progress takes over
+        status_loop.cancel()
         task["action"] = "Uploading"
+        task["status"] = "uploading"
+
         for i, part in enumerate(parts, 1):
             part_task = dict(task)
             part_task["name"] = os.path.basename(part)
             if len(parts) > 1:
-                part_task["name"] += f" [{i}/{len(parts)}]"
-            await upload_telegram(app, part_task, part, user)
+                part_task["name"] += " [{}/{}]".format(i, len(parts))
+            await upload_telegram(app, part_task, part, user, status_msg)
 
         task["done_flag"] = True
-        await asyncio.sleep(0.2)  # let status loop exit cleanly
-
-        final = await build_status({**task, "action": "Done ✅", "done": task["total"] or file_size})
-        await status_msg.edit(final)
+        await status_msg.edit(
+            "✅ **Done!**\n\n"
+            "**File:** `{}`\n"
+            "**Size:** {:.2f} MB\n"
+            "`/c{}`".format(
+                task["name"],
+                file_size / (1024 * 1024),
+                task_id
+            )
+        )
 
     except asyncio.CancelledError:
         task["done_flag"] = True
-        await status_msg.edit(f"❌ Task `/c{task_id}` cancelled.")
+        await status_msg.edit("❌ Task `/c{}` cancelled.".format(task_id))
 
     except Exception as e:
         task["done_flag"] = True
         log.exception("Leech error for task %d", task_id)
-        await status_msg.edit(f"❌ Error: `{e}`")
+        await status_msg.edit("❌ Error: `{}`".format(e))
 
     finally:
         status_loop.cancel()
         remove_task(task_id)
         cleanup(task_dir)
 
-
-# ── Cancel handler ─────────────────────────────────────────────────────────────
 
 @app.on_message(filters.private & filters.regex(r"^/c(\d+)$"))
 async def cancel_handler(_, message):
@@ -178,8 +168,8 @@ async def cancel_handler(_, message):
 
     task = get_task(task_id)
     if task is None:
-        await message.reply(f"No active task with ID `{task_id}`.")
+        await message.reply("No active task with ID `{}`.".format(task_id))
         return
 
     task["cancel"] = True
-    await message.reply(f"⏹ Cancelling task `/c{task_id}`...")
+    await message.reply("⏹ Cancelling task `/c{}`...".format(task_id))
