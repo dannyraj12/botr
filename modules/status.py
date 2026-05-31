@@ -1,33 +1,34 @@
 import psutil
 import shutil
 import time
+import os
 
 
-def human(size: float) -> str:
+def human(size):
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if size < 1024:
-            return f"{size:.2f} {unit}"
+            return "{:.2f} {}".format(size, unit)
         size /= 1024
-    return f"{size:.2f} TB"
+    return "{:.2f} TB".format(size)
 
 
-def progress_bar(percent: float) -> str:
+def progress_bar(percent):
     filled = int(percent / 10)
     return "⬢" * filled + "⬡" * (10 - filled)
 
 
-def elapsed_str(seconds: float) -> str:
+def elapsed_str(seconds):
     seconds = int(seconds)
     if seconds < 60:
-        return f"{seconds}s"
+        return "{}s".format(seconds)
     m, s = divmod(seconds, 60)
     if m < 60:
-        return f"{m}m {s}s"
+        return "{}m {}s".format(m, s)
     h, m = divmod(m, 60)
-    return f"{h}h {m}m {s}s"
+    return "{}h {}m {}s".format(h, m, s)
 
 
-def eta_str(done: int, total: int, start: float) -> str:
+def eta_str(done, total, start):
     if done <= 0 or total <= 0:
         return "..."
     elapsed = time.time() - start
@@ -39,27 +40,58 @@ def eta_str(done: int, total: int, start: float) -> str:
     return elapsed_str(eta)
 
 
-async def build_status(task: dict) -> str:
+def get_free_disk(path="/app"):
+    """
+    Try to find the largest available partition — not just root.
+    Falls back through common paths used on hosting platforms.
+    """
+    candidates = [path, "/app", "/home", "/tmp", "/mnt", "/"]
+    best_free = 0
+    for p in candidates:
+        try:
+            free = shutil.disk_usage(p).free
+            if free > best_free:
+                best_free = free
+        except Exception:
+            continue
+    return best_free
+
+
+async def build_status(task):
     done = task.get("done", 0)
     total = task.get("total", 0)
     start = task.get("start", time.time())
 
     percent = (done / total * 100) if total > 0 else 0
-    free = shutil.disk_usage("/").free
+    free = get_free_disk()
 
     return (
-        f"**{task['name']}**\n\n"
-        f"`{progress_bar(percent)}`\n\n"
-        f"**Progress:** {percent:.2f}%\n"
-        f"**Processed:** {human(done)}\n"
-        f"**Total Size:** {human(total)}\n"
-        f"**ETA:** {eta_str(done, total, start)}\n"
-        f"**Elapsed:** {elapsed_str(time.time() - start)}\n\n"
-        f"**Action:** {task.get('action', '—')}\n"
-        f"**Mode:** {task.get('mode', '—').capitalize()}\n"
-        f"**Engine:** Python\n\n"
-        f"💾 FREE: {human(free)}\n"
-        f"🖥 CPU: {psutil.cpu_percent()}%\n"
-        f"🧠 RAM: {psutil.virtual_memory().percent}%\n\n"
-        f"`/c{task['id']}`"
+        "**{}**\n\n"
+        "`{}`\n\n"
+        "**Progress:** {:.2f}%\n"
+        "**Processed:** {}\n"
+        "**Total Size:** {}\n"
+        "**ETA:** {}\n"
+        "**Elapsed:** {}\n\n"
+        "**Action:** {}\n"
+        "**Mode:** {}\n"
+        "**Engine:** Python\n\n"
+        "💾 FREE: {}\n"
+        "🖥 CPU: {}%\n"
+        "🧠 RAM: {}%\n\n"
+        "`/c{}`"
+    ).format(
+        task["name"],
+        progress_bar(percent),
+        percent,
+        human(done),
+        human(total),
+        eta_str(done, total, start),
+        elapsed_str(time.time() - start),
+        task.get("action", "—"),
+        task.get("mode", "—").capitalize(),
+        human(free),
+        psutil.cpu_percent(),
+        psutil.virtual_memory().percent,
+        task["id"]
     )
