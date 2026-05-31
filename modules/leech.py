@@ -85,24 +85,30 @@ async def leech_handler(_, message):
     dl_path = os.path.join(task_dir, raw_name)
 
     status_msg = await message.reply("🚀 Starting leech `{}`...".format(task_id))
-
     status_loop = asyncio.create_task(_status_loop(task, status_msg))
 
     try:
-        # Download
+        # ── Download ──────────────────────────────────────────────────────────
         task["status"] = "downloading"
         await download_file(task, url, dl_path)
 
-        # Extract
         process_path = dl_path
+
+        # ── Extract ───────────────────────────────────────────────────────────
         if do_extract:
             task["action"] = "Extracting"
+            # Always use a clean separate subdir to avoid Errno 20
+            extract_dir = os.path.join(task_dir, "extracted")
+            if os.path.exists(extract_dir):
+                import shutil
+                shutil.rmtree(extract_dir)
+            os.makedirs(extract_dir, exist_ok=True)
             process_path = await asyncio.get_event_loop().run_in_executor(
-                None, extract_file, dl_path, task_dir
+                None, extract_file, dl_path, extract_dir
             )
             task["name"] = os.path.basename(process_path)
 
-        # Zip
+        # ── Zip ───────────────────────────────────────────────────────────────
         if do_zip:
             task["action"] = "Zipping"
             process_path = await asyncio.get_event_loop().run_in_executor(
@@ -110,7 +116,7 @@ async def leech_handler(_, message):
             )
             task["name"] = os.path.basename(process_path)
 
-        # Split if needed
+        # ── Split if needed ───────────────────────────────────────────────────
         file_size = os.path.getsize(process_path)
         if file_size > FREE_SPLIT_SIZE:
             task["action"] = "Splitting"
@@ -120,7 +126,8 @@ async def leech_handler(_, message):
         else:
             parts = [process_path]
 
-        # Upload — stop status loop so upload progress takes over
+        # ── Upload ────────────────────────────────────────────────────────────
+        # Stop download status loop — upload progress takes over
         status_loop.cancel()
         task["action"] = "Uploading"
         task["status"] = "uploading"
@@ -136,11 +143,9 @@ async def leech_handler(_, message):
         await status_msg.edit(
             "✅ **Done!**\n\n"
             "**File:** `{}`\n"
-            "**Size:** {:.2f} MB\n"
-            "`/c{}`".format(
+            "**Size:** {:.2f} MB".format(
                 task["name"],
                 file_size / (1024 * 1024),
-                task_id
             )
         )
 
